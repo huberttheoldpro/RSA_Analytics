@@ -1,4 +1,4 @@
-Copyright © 2025 Hubert Gaszow All rights reserved
+#  Copyright © 2025 Hubert Gaszow All rights reserved
 import numpy as np
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
