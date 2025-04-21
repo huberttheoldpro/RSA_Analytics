@@ -1,5 +1,5 @@
 #  Copyright © 2025 Hubert Gaszow. All rights reserved.
-
+# The Flask framework used bellow is not robust or advanced only use it if you have spare resources otherwise just analyse the data later like a normal person
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from math import gcd, prod, log2, ceil
 import multiprocessing
