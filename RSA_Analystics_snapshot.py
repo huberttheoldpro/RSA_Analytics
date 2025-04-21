@@ -1,39 +1,149 @@
 #  Copyright © 2025 Hubert Gaszow. All rights reserved.
 
-import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
 from math import gcd, prod, log2, ceil
 import multiprocessing
 from collections import Counter
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import IsolationForest
-from sympy import primerange, factorint
 import random
 import tempfile
 import time
 import traceback
 import json
-import pandas as pd
 import argparse
-import matplotlib.pyplot as plt
-import seaborn as sns
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa
 import hashlib
 import os
 from datetime import datetime
+
+terminate == False 
+
+def missing_library_installer(terminate):
+    pycryptodome = False
+    try:
+        from Crypto.PublicKey import RSA
+        from Crypto.Cipher import PKCS1_OAEP
+        pycryptodome = True
+    except ImportError:
+        print("PyCryptodome is missing or not accessible, attempting to install pycryptodome now")
+        os.system("pip install pycryptodome")
+        print("Reattempting import of pycryptodome features")
+        try:
+            from Crypto.PublicKey import RSA
+            from Crypto.Cipher import PKCS1_OAEP
+            pycryptodome = True
+        except ImportError:
+            print("Import failed. Terminating.")
+            terminate = True
+    numpy = False
+    try:
+        import numpy as np
+        numpy = True
+    except ImportError:
+        print("Numpy is missing or not accessible, attempting to install numpy")
+        os.system("pip install numpy")
+        print("Reattempting to import numpy now")
+        try:
+            import numpy as np
+            numpy = True
+        except ImportError:
+            print("Import failed. The script will now terminate.")
+            terminate = True
+    sklearn_installed = False
+    try:
+        import sklearn
+        sklearn_installed = True
+    except ImportError:
+        print("scikit-learn is missing, attempting to install scikit-learn")
+        os.system("pip install scikit-learn")
+        print("Reattempting to import scikit-learn now")
+        try:
+            import sklearn
+            sklearn_installed = True
+        except ImportError:
+            print("Import failed. The script will now terminate.")
+            terminate = True
+    sympy_installed = False
+    try:
+        import sympy
+        sympy_installed = True
+    except ImportError:
+        print("sympy is missing, attempting to install sympy")
+        os.system("pip install sympy")
+        print("Reattempting to import sympy now")
+        try:
+            import sympy
+            sympy_installed = True
+        except ImportError:
+            print("Import failed. The script will now terminate.")
+            terminate = True
+    pandas_installed = False
+    try:
+        import pandas as pd
+        pandas_installed = True
+    except ImportError:
+        print("pandas is missing, attempting to install pandas")
+        os.system("pip install pandas")
+        print("Reattempting to import pandas now")
+        try:
+            import pandas as pd
+            pandas_installed = True
+        except ImportError:
+            print("Import failed. The script will now terminate.")
+            terminate = True
+    matplotlib_installed = False
+    try:
+        import matplotlib.pyplot as plt
+        matplotlib_installed = True
+    except ImportError:
+        print("matplotlib is missing, attempting to install matplotlib")
+        os.system("pip install matplotlib")
+        print("Reattempting to import matplotlib now")
+        try:
+            import matplotlib.pyplot as plt
+            matplotlib_installed = True
+        except ImportError:
+            print("Import failed. The script will now terminate.")
+            terminate = True
+    seaborn_installed = False
+    try:
+        import seaborn as sns
+        seaborn_installed = True
+    except ImportError:
+        print("seaborn is missing, attempting to install seaborn")
+        os.system("pip install seaborn")
+        print("Reattempting to import seaborn now")
+        try:
+            import seaborn as sns
+            seaborn_installed = True
+        except ImportError:
+            print("Import failed. The script will now terminate.")
+            terminate = True
+    cryptography_installed = False
+    try:
+        import cryptography
+        cryptography_installed = True
+    except ImportError:
+        print("cryptography is missing, attempting to install cryptography")
+        os.system("pip install cryptography")
+        print("Reattempting to import cryptography now")
+        try:
+            import cryptography
+            cryptography_installed = True
+        except ImportError:
+            print("Import failed. The script will now terminate.")
+            terminate = True
+    return terminate
+
+
+
+
+
 
 LOGFILE = "/root/rsa_analysis_log.txt"
 JSONFILE = "/root/rsa_analysis_metadata.json"
 KEY_SIZE = 1024
 NUM_SAMPLES = 50
 KNOWN_BAD_PRIMES = [3, 5, 7, 11]
-MAX_LOG_SIZE = 10 * 1024 * 1024  # 10MB log rotation
+MAX_LOG_SIZE = 10 * 1024 * 1024  #10MB log rotation
 
 def log(msg):
     print(msg)
@@ -53,29 +163,48 @@ def generate_sample_data(num_samples=NUM_SAMPLES, key_size=KEY_SIZE):
     plaintext_sizes = []
     e_values = []
     plaintext = b'This is a test message.'
+    temp_files = []  #temp file trace
 
-    for idx in range(num_samples):
-        key = RSA.generate(key_size)
-        cipher = PKCS1_OAEP.new(key.publickey())
-        ct = cipher.encrypt(plaintext)
-        keys.append(key.publickey().n)
-        ciphertexts.append(int.from_bytes(ct, byteorder='big'))
-        e_values.append(key.publickey().e)
+    try:
+        for idx in range(num_samples):
+            key = RSA.generate(key_size)
+            cipher = PKCS1_OAEP.new(key.publickey())
+            ct = cipher.encrypt(plaintext)
+            keys.append(key.publickey().n)
+            ciphertexts.append(int.from_bytes(ct, byteorder='big'))
+            e_values.append(key.publickey().e)
 
-        with tempfile.NamedTemporaryFile(delete=False) as pt_file, \
-             tempfile.NamedTemporaryFile(delete=False) as ct_file:
-            pt_file.write(plaintext)
-            pt_file.flush()
-            ct_file.write(ct)
-            ct_file.flush()
-            pt_filename = pt_file.name
-            ct_filename = ct_file.name
+            pt_file = tempfile.NamedTemporaryFile(delete=False)
+            ct_file = tempfile.NamedTemporaryFile(delete=False)
 
-        plaintext_sizes.append(os.path.getsize(pt_filename))
-        file_sizes.append(os.path.getsize(ct_filename))
+            try:
+                pt_file.write(plaintext)
+                pt_file.flush()
+                ct_file.write(ct)
+                ct_file.flush()
 
-        os.remove(pt_filename)
-        os.remove(ct_filename)
+                pt_filename = pt_file.name
+                ct_filename = ct_file.name
+
+                plaintext_sizes.append(os.path.getsize(pt_filename))
+                file_sizes.append(os.path.getsize(ct_filename))
+
+                temp_files.append(pt_filename)
+                temp_files.append(ct_filename)
+
+            finally:
+                pt_file.close() 
+                ct_file.close()  
+
+    except Exception as e:
+        log(f"Error generating sample data: {e}")
+        print(traceback.format_exc())
+    finally:
+        for filename in temp_files:
+            try:
+                os.remove(filename)
+            except Exception as e:
+                log(f"Error removing temp file {filename}: {e}")
 
     return (
         np.array(keys),
@@ -200,7 +329,6 @@ def shannon_entropy(binary_string):
 
 def entropy_analysis(ciphertexts, findings):
     try:
-        # Vectorized entropy calculation
         binary_ciphertexts = [bin(c)[2:] for c in ciphertexts]
         entropies = np.array([shannon_entropy(bc) for bc in binary_ciphertexts])
         
@@ -296,8 +424,6 @@ def modulus_reuse_check(keys, findings):
                 msg = f"Modulus reused {count} times: n = {n}"
                 log(msg)
                 findings['modulus_reuse'].append(msg)
-                
-                # Attempt to factor the reused modulus
                 try:
                     factors = factorint(n)
                     msg = f"  Factors of reused modulus: {factors}"
@@ -324,7 +450,6 @@ def hamming_distance(a, b):
 
 def ciphertext_hamming_analysis(ciphertexts, findings):
     try:
-        # Vectorized Hamming distance calculation
         for i in range(len(ciphertexts)):
             distances = np.array([hamming_distance(ciphertexts[i], ciphertexts[j]) for j in range(i+1, len(ciphertexts))])
             for j, d in enumerate(distances):
@@ -482,7 +607,6 @@ def run_all_checks(args):
         'ciphertext_fingerprints': [],
     }
 
-    #Always generate sample data
     keys, ciphertexts, file_sizes, e_values, plaintext_sizes = generate_sample_data()
 
     if not (args.quick or args.entropy_only):
@@ -604,4 +728,3 @@ if __name__ == "__main__":
             time.sleep(3)
     except KeyboardInterrupt:
         log("=== RSA Pattern Analysis Stopped ===")
-
