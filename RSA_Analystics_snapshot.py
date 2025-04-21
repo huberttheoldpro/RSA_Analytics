@@ -14,9 +14,22 @@ import hashlib
 import os
 from datetime import datetime
 
-terminate == False 
+terminate = False
 
 def missing_library_installer(terminate):
+    flask = False
+    try:
+        from flask import Flask, render_template, request
+    except ImportError:
+        print("PyCryptodome is missing or not accessible, attempting to install pycryptodome now")
+        os.system("pip install flask")
+        print("Reattempting import of flask features")
+        try:
+            from flask import Flask, render_template, request
+            flask = True
+        except ImportError:
+            print("Import failed. Terminating.")
+            terminate = True
     pycryptodome = False
     try:
         from Crypto.PublicKey import RSA
@@ -132,9 +145,6 @@ def missing_library_installer(terminate):
             print("Import failed. The script will now terminate.")
             terminate = True
     return terminate
-
-
-
 
 
 
@@ -701,7 +711,268 @@ def run_all_checks(args):
 
     return findings
 
-if __name__ == "__main__":
+
+def run_flask(args, keys, ciphertexts, file_sizes, e_values, plaintext_sizes, findings):
+    from flask import Flask, render_template, request
+    import pandas as pd
+    import io
+    import base64
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+    import json
+    import os
+
+    app = Flask(__name__)
+
+    global last_updated
+    last_updated = None
+    JSON_FILE = "/root/rsa_analysis_metadata.json"
+
+    index_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>RSA Analysis Visualization</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            h1 { color: #333; }
+            .plot-container { border: 1px solid #ddd; margin-bottom: 20px; padding: 10px; }
+            .plot-image { max-width: 100%; height: auto; }
+            .data-selection { margin-bottom: 20px; }
+            label { display: block; margin-bottom: 5px; }
+            .timestamp { font-size: small; color: gray; }
+        </style>
+        <meta http-equiv="refresh" content="30">
+    </head>
+    <body>
+        <h1>RSA Analysis Visualization</h1>
+        <p class="timestamp">Last updated: {{ last_updated }}</p>
+
+        <div class="data-selection">
+            <form method="post" action="/">
+                <label>Select Data to Visualize:</label>
+                {% for data_id in available_data %}
+                    <div>
+                        <input type="checkbox" id="{{ data_id }}" name="data_selection" value="{{ data_id }}" {% if data_id in selected_data %}checked{% endif %}>
+                        <label for="{{ data_id }}">{{ data_id.capitalize() }}</label>
+                    </div>
+                {% endfor %}
+                <button type="submit">Update Plots</button>
+            </form>
+        </div>
+
+        {% if plots %}
+            {% for plot in plots %}
+                <div class="plot-container">
+                    <h2>{{ plot.title }}</h2>
+                    {% if plot.image %}
+                        <img src="data:image/png;base64,{{ plot.image }}" alt="Plot of {{ plot.title }}" class="plot-image">
+                    {% elif plot.error %}
+                        <p style="color: red;">Error: {{ plot.error }}</p>
+                    {% else %}
+                        <p>No data to display for {{ plot.title }}.</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>No plots to display. Select data and click 'Update Plots'.</p>
+        {% endif %}
+
+        {% if findings %}
+            <h2>Findings:</h2>
+            <ul>
+                {% for key, value in findings.items() %}
+                    <li><strong>{{ key }}:</strong> {{ value }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+    </body>
+    </html>
+    """
+
+    def render_template(template_name, **context):
+        if template_name == "index.html":
+            s = index_html
+            for key, value in context.items():
+                s = s.replace("{{ " + key + " }}", str(value))
+                if isinstance(value, list):
+                    s = s.replace("{{ " + key + "|length }}", str(len(value)))
+            if "{% for data_id in available_data %}" in s:
+                loop_content = ""
+                start = s.find("{% for data_id in available_data %}")
+                end = s.find("{% endfor %}")
+                if start != -1 and end != -1:
+                    template = s[
+                        start
+                        + len("{% for data_id in available_data %}") : end
+                    ]
+                    for data_id in context.get("available_data", []):
+                        temp = template.replace("{{ data_id }}", str(data_id))
+                        temp = temp.replace(
+                            "{{ data_id|capitalize }}", str(data_id).capitalize()
+                        )
+                        if data_id in context.get("selected_data", []):
+                            temp = temp.replace(
+                                "{{ 'checked' if data_id in selected_data else '' }}",
+                                "checked",
+                            )
+                        else:
+                            temp = temp.replace(
+                                "{{ 'checked' if data_id in selected_data else '' }}",
+                                "",
+                            )
+                        loop_content += temp
+                    s = s[:start] + loop_content + s[end + len("{% endfor %}") :]
+
+            return s
+        else:
+            return f"Template not found: {template_name}"
+
+    def create_flask_app(
+        keys_data,
+        ciphertexts_data,
+        file_sizes_data,
+        e_values_data,
+        plaintext_sizes_data,
+        findings_data,
+        update_interval=60,
+    ):
+        global keys, ciphertexts, file_sizes, e_values, plaintext_sizes, findings, last_updated
+        keys, ciphertexts, file_sizes, e_values, plaintext_sizes, findings = (
+            keys_data,
+            ciphertexts_data,
+            file_sizes_data,
+            e_values_data,
+            plaintext_sizes_data,
+            findings_data,
+        )
+        last_updated = time.strftime("%Y-%m-%d %H:%M:%S")
+        app = Flask(__name__)
+        app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+        @app.route("/", methods=["GET", "POST"])
+        def index():
+            plots = []
+            selected_data = {}
+
+            if request.method == "POST":
+                selected_data = request.form.getlist("data_selection")
+            else:
+                selected_data = [
+                    "keys",
+                    "ciphertexts",
+                    "file_sizes",
+                    "e_values",
+                    "plaintext_sizes",
+                ]
+
+            available_data = {
+                "keys": {"data": keys, "label": "Keys"},
+                "ciphertexts": {"data": ciphertexts, "label": "Ciphertexts"},
+                "file_sizes": {"data": file_sizes, "label": "File Sizes"},
+                "e_values": {"data": e_values, "label": "E Values"},
+                "plaintext_sizes": {"data": plaintext_sizes, "label": "Plaintext Sizes"},
+            }
+
+            for data_id in selected_data:
+                if data_id in available_data:
+                    data = available_data[data_id]["data"]
+                    label = available_data[data_id]["label"]
+
+                    if data is not None and len(data) > 0:
+                        try:
+                            fig, ax = plt.subplots(figsize=(8, 6))
+                            sns.histplot(data, kde=True, ax=ax)
+                            ax.set_title(f"Distribution of {label}")
+                            ax.set_xlabel(label)
+                            ax.set_ylabel("Frequency")
+
+                            canvas = FigureCanvas(fig)
+                            img_data = io.BytesIO()
+                            fig.savefig(img_data, format="png")
+                            img_data.seek(0)
+
+                            plot_url = base64.b64encode(img_data.read()).decode("utf-8")
+                            plots.append({"title": label, "image": plot_url})
+
+                            plt.close(fig)
+                        except Exception as e:
+                            plots.append(
+                                {
+                                    "title": label,
+                                    "image": None,
+                                    "error": f"Plotting error: {e}",
+                                }
+                            )
+                    else:
+                        plots.append(
+                            {
+                                "title": label,
+                                "image": None,
+                                "error": "Data is empty or not available.",
+                            }
+                        )
+
+            return render_template(
+                "index.html",
+                plots=plots,
+                selected_data=selected_data,
+                available_data=available_data.keys(),
+                findings=findings,
+                last_updated=last_updated,
+            )
+
+        def update_data():
+            global keys, ciphertexts, file_sizes, e_values, plaintext_sizes, findings, last_updated
+            while True:
+                try:
+                    if os.path.exists(JSON_FILE):
+                        with open(JSON_FILE, "r") as f:
+                            data = json.load(f)
+                        keys = np.array(data.get("keys", []))
+                        ciphertexts = np.array(data.get("ciphertexts", []))
+                        file_sizes = np.array(data.get("file_sizes", []))
+                        e_values = np.array(data.get("e_values", []))
+                        plaintext_sizes = np.array(data.get("plaintext_sizes", []))
+                        findings = data.get("findings", {})
+
+                        last_updated = time.strftime("%Y-%m-%d %H:%M:%S")
+                        print("Data updated from JSON at:", last_updated)
+                    else:
+                        print(f"JSON file not found: {JSON_FILE}")
+
+                except Exception as e:
+                    print(f"Error updating data from JSON: {e}")
+                time.sleep(update_interval)
+
+        update_thread = Thread(target=update_data)
+        update_thread.daemon = True  # Daemons scary
+        update_thread.start()
+
+        return app
+
+    def connect_to_remote(app, host='0.0.0.0', port=5000):
+        """
+        Runs the Flask app, making it accessible from other computers on the network.
+
+        Args:
+            app: The Flask app instance.
+            host: The hostname to listen on. '0.0.0.0' makes the app accessible
+                  from any address.
+            port: The port to listen on.
+        """
+        print(f"Running the app on port {port}, other computers can connect to this via the local network")
+        app.run(host=host, port=port, debug=True)
+    
+    app = create_flask_app(keys, ciphertexts, file_sizes, e_values, plaintext_sizes, findings)
+    connect_to_remote(app, host='0.0.0.0', port=5000)
+
+
+if __name__ == "__main__" and terminate != True:
+
     default_workers = multiprocessing.cpu_count()
     parser = argparse.ArgumentParser(description='Analyze RSA keys for patterns.')
     parser.add_argument('--quick', action='store_true', help='Run only a quick analysis (skips some checks).')
@@ -712,19 +983,28 @@ if __name__ == "__main__":
     parser.add_argument('--key-file', type=str, help='Path to a file containing a list of RSA moduli (one per line).')
     parser.add_argument('--save-csv', action='store_true', help='Save metadata to CSV file.')
     parser.add_argument('--threads', type=int, default=default_workers, help=f'Number of threads to use (default: number of CPU cores = {default_workers})')
+    parser.add_argument('--run-flask', action='store_true', help='Run the Flask visualization server.')
     args = parser.parse_args()
 
     log("=== RSA Pattern Analysis Started ===")
     try:
         while True:
             findings = run_all_checks(args)
+
             try:
-                with open(JSONFILE, "a") as jf:
+                with open(JSONFILE, "w") as jf:
                     json.dump(findings, jf)
-                    jf.write("\n")
             except Exception as e:
                 log(f"Error writing to JSON file: {e}")
-            log("Batch complete. Sleeping 3 seconds...\n")
+
+            log("Batch complete.\n")
+            if args.run_flask:
+                log("Starting Flask server...\n")
+                keys, ciphertexts, file_sizes, e_values, plaintext_sizes = generate_sample_data() 
+                run_flask(args, keys, ciphertexts, file_sizes, e_values, plaintext_sizes, findings) 
+                log("Flask server stopped.\n")
+
             time.sleep(3)
+
     except KeyboardInterrupt:
         log("=== RSA Pattern Analysis Stopped ===")
