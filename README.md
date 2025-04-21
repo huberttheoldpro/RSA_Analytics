@@ -5,7 +5,7 @@ This code is designed for Linux and will not work on Windows without the /root d
 The code is not intended, nor should it be used, for unauthorized attempts to break or compromise real-world RSA implementations.
 Modification for such purposes is strictly discouraged.
 
-
+'''
 How to use:
 With flask: python RSA_Analytics_snapshot.py --run-flask
 Without flask: python RSA_Analytics_snapshot.py
@@ -18,3 +18,4 @@ To save to a CSV file: python RSA_Analytics_snapshot.py --save-csv
 A path to RSA moduli: python RSA_Analytics_snapshot.py --key-file
 Threaded run: python RSA_Analytics_snapshot.py --threads
 If this does not work you may have to run it with python3, it will by default do a deep scan.
+'''
